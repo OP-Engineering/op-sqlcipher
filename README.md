@@ -166,7 +166,7 @@ export OP_SQLITE_PERF=1
 yarn android
 ```
 
-If correctly set you should see the following output in your console
+If correctly set you should see the following output in your console. Bear in mind, the performance increase is achieved by disabling some features (including old and deprecated features), if you enable it be sure to test your app to make sure everything is still working.
 
 ```sh
 OP-SQLITE performance mode enabled! 🚀
