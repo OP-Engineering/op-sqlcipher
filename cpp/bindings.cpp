@@ -35,7 +35,7 @@ bool invalidated = false;
 void clearState() {
   invalidated = true;
   // Will terminate all operations and database connections
-  sqlite_close_all();
+  opsqlite_close_all();
   // We then join all the threads before the context gets invalidated
   pool.restartPool();
   updateHooks.clear();
@@ -87,7 +87,7 @@ void install(jsi::Runtime &rt,
 
     encryptionKey = args[2].asString(rt).utf8(rt);
 
-    BridgeResult result = sqlite_open(dbName, path, encryptionKey);
+    BridgeResult result = opsqlite_open(dbName, path, encryptionKey);
 
     if (result.type == SQLiteError) {
       throw std::runtime_error(result.message);
@@ -121,7 +121,7 @@ void install(jsi::Runtime &rt,
     std::string databaseToAttach = args[1].asString(rt).utf8(rt);
     std::string alias = args[2].asString(rt).utf8(rt);
     BridgeResult result =
-        sqlite_attach(dbName, tempDocPath, databaseToAttach, alias);
+        opsqlite_attach(dbName, tempDocPath, databaseToAttach, alias);
 
     if (result.type == SQLiteError) {
       throw std::runtime_error(result.message);
@@ -143,7 +143,7 @@ void install(jsi::Runtime &rt,
 
     std::string dbName = args[0].asString(rt).utf8(rt);
     std::string alias = args[1].asString(rt).utf8(rt);
-    BridgeResult result = sqlite_detach(dbName, alias);
+    BridgeResult result = opsqlite_detach(dbName, alias);
 
     if (result.type == SQLiteError) {
       throw jsi::JSError(rt, result.message.c_str());
@@ -164,7 +164,7 @@ void install(jsi::Runtime &rt,
 
     std::string dbName = args[0].asString(rt).utf8(rt);
 
-    BridgeResult result = sqlite_close(dbName);
+    BridgeResult result = opsqlite_close(dbName);
 
     if (result.type == SQLiteError) {
       throw jsi::JSError(rt, result.message.c_str());
@@ -196,7 +196,7 @@ void install(jsi::Runtime &rt,
       tempDocPath = tempDocPath + "/" + args[1].asString(rt).utf8(rt);
     }
 
-    BridgeResult result = sqlite_remove(dbName, tempDocPath);
+    BridgeResult result = opsqlite_remove(dbName, tempDocPath);
 
     if (result.type == SQLiteError) {
       throw std::runtime_error(result.message);
@@ -219,7 +219,7 @@ void install(jsi::Runtime &rt,
     std::shared_ptr<std::vector<SmartHostObject>> metadata =
         std::make_shared<std::vector<SmartHostObject>>();
 
-    auto status = sqlite_execute(dbName, query, &params, &results, metadata);
+    auto status = opsqlite_execute(dbName, query, &params, &results, metadata);
 
     if (status.type == SQLiteError) {
       throw std::runtime_error(status.message);
@@ -229,7 +229,68 @@ void install(jsi::Runtime &rt,
     return jsiResult;
   });
 
-  auto executeAsync = HOSTFN("executeAsync", 3) {
+  auto execute_raw_async = HOSTFN("executeRawAsync", 3) {
+    if (count < 3) {
+      throw std::runtime_error(
+          "[op-sqlite][executeAsync] Incorrect arguments for executeAsync");
+    }
+
+    const std::string dbName = args[0].asString(rt).utf8(rt);
+    const std::string query = args[1].asString(rt).utf8(rt);
+    const jsi::Value &originalParams = args[2];
+
+    std::vector<JSVariant> params = toVariantVec(rt, originalParams);
+
+    auto promiseCtr = rt.global().getPropertyAsFunction(rt, "Promise");
+
+        auto promise = promiseCtr.callAsConstructor(rt, HOSTFN("executor", 2) {
+      auto resolve = std::make_shared<jsi::Value>(rt, args[0]);
+      auto reject = std::make_shared<jsi::Value>(rt, args[1]);
+
+      auto task = [&rt, dbName, query, params = std::move(params), resolve,
+                   reject]() {
+        try {
+          std::vector<std::vector<JSVariant>> results;
+
+          auto status = opsqlite_execute_raw(dbName, query, &params, &results);
+
+          if (invalidated) {
+            return;
+          }
+
+          invoker->invokeAsync([&rt, results = std::move(results),
+                                status = std::move(status), resolve, reject] {
+            if (status.type == SQLiteOk) {
+              auto jsiResult = create_raw_result(rt, status, &results);
+              resolve->asObject(rt).asFunction(rt).call(rt,
+                                                        std::move(jsiResult));
+            } else {
+              auto errorCtr = rt.global().getPropertyAsFunction(rt, "Error");
+              auto error = errorCtr.callAsConstructor(
+                  rt, jsi::String::createFromUtf8(rt, status.message));
+              reject->asObject(rt).asFunction(rt).call(rt, error);
+            }
+          });
+
+        } catch (std::exception &exc) {
+          invoker->invokeAsync([&rt, exc = std::move(exc), reject] {
+            auto errorCtr = rt.global().getPropertyAsFunction(rt, "Error");
+            auto error = errorCtr.callAsConstructor(
+                rt, jsi::String::createFromAscii(rt, exc.what()));
+            reject->asObject(rt).asFunction(rt).call(rt, error);
+          });
+        }
+      };
+
+      pool.queueWork(task);
+
+      return {};
+        }));
+
+        return promise;
+  });
+
+  auto execute_async = HOSTFN("executeAsync", 3) {
     if (count < 3) {
       throw std::runtime_error(
           "[op-sqlite][executeAsync] Incorrect arguments for executeAsync");
@@ -255,7 +316,7 @@ void install(jsi::Runtime &rt,
               std::make_shared<std::vector<SmartHostObject>>();
 
           auto status =
-              sqlite_execute(dbName, query, &params, &results, metadata);
+              opsqlite_execute(dbName, query, &params, &results, metadata);
 
           if (invalidated) {
             return;
@@ -297,10 +358,7 @@ void install(jsi::Runtime &rt,
     return promise;
   });
 
-  // Execute a batch of SQL queries in a transaction
-  // Parameters can be: [[sql: string, arguments: any[] | arguments: any[][]
-  // ]]
-  auto executeBatch = HOSTFN("executeBatch", 2) {
+  auto execute_batch = HOSTFN("executeBatch", 2) {
     if (sizeof(args) < 2) {
       throw std::runtime_error(
           "[op-sqlite][executeBatch] - Incorrect parameter count");
@@ -326,7 +384,7 @@ void install(jsi::Runtime &rt,
     }
   });
 
-  auto executeBatchAsync = HOSTFN("executeBatchAsync", 2) {
+  auto execute_batch_async = HOSTFN("executeBatchAsync", 2) {
     if (sizeof(args) < 2) {
       throw std::runtime_error(
           "[op-sqlite][executeAsyncBatch] Incorrect parameter count");
@@ -384,7 +442,7 @@ void install(jsi::Runtime &rt,
         return promise;
   });
 
-  auto loadFile = HOSTFN("loadFile", 2) {
+  auto load_file = HOSTFN("loadFile", 2) {
     if (sizeof(args) < 2) {
       throw std::runtime_error(
           "[op-sqlite][loadFileAsync] Incorrect parameter count");
@@ -427,7 +485,7 @@ void install(jsi::Runtime &rt,
         return promise;
   });
 
-  auto updateHook = HOSTFN("updateHook", 2) {
+  auto update_hook = HOSTFN("updateHook", 2) {
     if (sizeof(args) < 2) {
       throw std::runtime_error("[op-sqlite][updateHook] Incorrect parameters: "
                                "dbName and callback needed");
@@ -438,7 +496,7 @@ void install(jsi::Runtime &rt,
     auto callback = std::make_shared<jsi::Value>(rt, args[1]);
 
     if (callback->isUndefined() || callback->isNull()) {
-      sqlite_deregister_update_hook(dbName);
+      opsqlite_deregister_update_hook(dbName);
       return {};
     }
 
@@ -450,12 +508,11 @@ void install(jsi::Runtime &rt,
       std::vector<DumbHostObject> results;
       std::shared_ptr<std::vector<SmartHostObject>> metadata =
           std::make_shared<std::vector<SmartHostObject>>();
-      ;
 
       if (operation != "DELETE") {
         std::string query = "SELECT * FROM " + tableName +
                             " where rowid = " + std::to_string(rowId) + ";";
-        sqlite_execute(dbName, query, &params, &results, metadata);
+        opsqlite_execute(dbName, query, &params, &results, metadata);
       }
 
       invoker->invokeAsync(
@@ -480,12 +537,12 @@ void install(jsi::Runtime &rt,
           });
     };
 
-    sqlite_register_update_hook(dbName, std::move(hook));
+    opsqlite_register_update_hook(dbName, std::move(hook));
 
     return {};
   });
 
-  auto commitHook = HOSTFN("commitHook", 2) {
+  auto commit_hook = HOSTFN("commitHook", 2) {
     if (sizeof(args) < 2) {
       throw std::runtime_error("[op-sqlite][commitHook] Incorrect parameters: "
                                "dbName and callback needed");
@@ -495,7 +552,7 @@ void install(jsi::Runtime &rt,
     auto dbName = args[0].asString(rt).utf8(rt);
     auto callback = std::make_shared<jsi::Value>(rt, args[1]);
     if (callback->isUndefined() || callback->isNull()) {
-      sqlite_deregister_commit_hook(dbName);
+      opsqlite_deregister_commit_hook(dbName);
       return {};
     }
     commitHooks[dbName] = callback;
@@ -505,12 +562,12 @@ void install(jsi::Runtime &rt,
           [&rt, callback] { callback->asObject(rt).asFunction(rt).call(rt); });
     };
 
-    sqlite_register_commit_hook(dbName, std::move(hook));
+    opsqlite_register_commit_hook(dbName, std::move(hook));
 
     return {};
   });
 
-  auto rollbackHook = HOSTFN("rollbackHook", 2) {
+  auto rollback_hook = HOSTFN("rollbackHook", 2) {
     if (sizeof(args) < 2) {
       throw std::runtime_error(
           "[op-sqlite][rollbackHook] Incorrect parameters: "
@@ -522,7 +579,7 @@ void install(jsi::Runtime &rt,
     auto callback = std::make_shared<jsi::Value>(rt, args[1]);
 
     if (callback->isUndefined() || callback->isNull()) {
-      sqlite_deregister_rollback_hook(dbName);
+      opsqlite_deregister_rollback_hook(dbName);
       return {};
     }
     rollbackHooks[dbName] = callback;
@@ -532,20 +589,35 @@ void install(jsi::Runtime &rt,
           [&rt, callback] { callback->asObject(rt).asFunction(rt).call(rt); });
     };
 
-    sqlite_register_rollback_hook(dbName, std::move(hook));
+    opsqlite_register_rollback_hook(dbName, std::move(hook));
     return {};
   });
 
-  auto prepareStatement = HOSTFN("prepareStatement", 1) {
+  auto prepare_statement = HOSTFN("prepareStatement", 1) {
     auto dbName = args[0].asString(rt).utf8(rt);
     auto query = args[1].asString(rt).utf8(rt);
 
-    sqlite3_stmt *statement = sqlite_prepare_statement(dbName, query);
+    sqlite3_stmt *statement = opsqlite_prepare_statement(dbName, query);
 
     auto preparedStatementHostObject =
         std::make_shared<PreparedStatementHostObject>(dbName, statement);
 
     return jsi::Object::createFromHostObject(rt, preparedStatementHostObject);
+  });
+
+  auto load_extension = HOSTFN("loadExtension", 2) {
+    auto db_name = args[0].asString(rt).utf8(rt);
+    auto path = args[1].asString(rt).utf8(rt);
+    std::string entryPoint = "";
+    if (count > 2 && args[2].isString()) {
+      entryPoint = args[2].asString(rt).utf8(rt);
+    }
+
+    auto result = opsqlite_load_extension(db_name, path, entryPoint);
+    if (result.type == SQLiteError) {
+      throw std::runtime_error(result.message);
+    }
+    return {};
   });
 
   jsi::Object module = jsi::Object(rt);
@@ -556,14 +628,16 @@ void install(jsi::Runtime &rt,
   module.setProperty(rt, "detach", std::move(detach));
   module.setProperty(rt, "delete", std::move(remove));
   module.setProperty(rt, "execute", std::move(execute));
-  module.setProperty(rt, "executeAsync", std::move(executeAsync));
-  module.setProperty(rt, "executeBatch", std::move(executeBatch));
-  module.setProperty(rt, "executeBatchAsync", std::move(executeBatchAsync));
-  module.setProperty(rt, "loadFile", std::move(loadFile));
-  module.setProperty(rt, "updateHook", std::move(updateHook));
-  module.setProperty(rt, "commitHook", std::move(commitHook));
-  module.setProperty(rt, "rollbackHook", std::move(rollbackHook));
-  module.setProperty(rt, "prepareStatement", std::move(prepareStatement));
+  module.setProperty(rt, "executeAsync", std::move(execute_async));
+  module.setProperty(rt, "executeBatch", std::move(execute_batch));
+  module.setProperty(rt, "executeBatchAsync", std::move(execute_batch_async));
+  module.setProperty(rt, "loadFile", std::move(load_file));
+  module.setProperty(rt, "updateHook", std::move(update_hook));
+  module.setProperty(rt, "commitHook", std::move(commit_hook));
+  module.setProperty(rt, "rollbackHook", std::move(rollback_hook));
+  module.setProperty(rt, "prepareStatement", std::move(prepare_statement));
+  module.setProperty(rt, "loadExtension", std::move(load_extension));
+  module.setProperty(rt, "executeRawAsync", std::move(execute_raw_async));
 
   rt.global().setProperty(rt, "__OPSQLiteProxy", std::move(module));
 }

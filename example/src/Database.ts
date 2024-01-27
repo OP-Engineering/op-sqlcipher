@@ -1,9 +1,9 @@
 import performance from 'react-native-performance';
 import Chance from 'chance';
 import {open} from '@op-engineering/op-sqlcipher';
-// import {MMKV} from 'react-native-mmkv';
-// const mmkv = new MMKV();
-// import { Buffer } from 'buffer';
+import {MMKV} from 'react-native-mmkv';
+const mmkv = new MMKV();
+import {Buffer} from 'buffer';
 
 const chance = new Chance();
 
@@ -70,11 +70,13 @@ export async function queryLargeDB() {
     access: number[];
     prepare: number[];
     preparedExecution: number[];
+    rawExecution: number[];
   } = {
     loadFromDb: [],
     access: [],
     prepare: [],
     preparedExecution: [],
+    rawExecution: [],
   };
 
   for (let i = 0; i < 10; i++) {
@@ -82,18 +84,23 @@ export async function queryLargeDB() {
     global.gc();
 
     let start = performance.now();
-    const results = await largeDb.executeAsync('SELECT * FROM Test;');
+    await largeDb.executeAsync('SELECT * FROM Test;');
     let end = performance.now();
     times.loadFromDb.push(end - start);
 
     // mmkv.set('largeDB', JSON.stringify(results));
-    // // @ts-ignore
-    // global.gc();
+    // @ts-ignore
+    global.gc();
 
     // start = performance.now();
     // let rawStr = await mmkv.getString('largeDB');
     // JSON.parse(rawStr!);
     // end = performance.now();
+
+    start = performance.now();
+    await largeDb.executeRawAsync('SELECT * FROM Test;');
+    end = performance.now();
+    times.rawExecution.push(end - start);
 
     // console.log('MMKV time', (end - start).toFixed(2));
 

@@ -23,7 +23,9 @@ import clsx from 'clsx';
 import {preparedStatementsTests} from './tests/preparedStatements.spec';
 import {constantsTests} from './tests/constants.spec';
 import performance from 'react-native-performance';
-import UpdateHookPage from './UpdateHook';
+// import UpdateHookPage from './UpdateHook';
+import {MMKV} from 'react-native-mmkv';
+export const mmkv = new MMKV();
 
 const StyledScrollView = styled(ScrollView, {
   props: {
@@ -41,7 +43,11 @@ export default function App() {
     [],
   );
   const [singleRecordTime, setSingleRecordTime] = useState<number>(0);
-
+  const [sqliteMMSetTime, setSqliteMMSetTime] = useState(0);
+  const [mmkvSetTime, setMMKVSetTime] = useState(0);
+  const [sqliteGetTime, setSqliteMMGetTime] = useState(0);
+  const [mmkvGetTime, setMMKVGetTime] = useState(0);
+  const [rawExecutionTimes, setRawExecutionTimes] = useState<number[]>([]);
   useEffect(() => {
     setResults([]);
     runTests(
@@ -68,12 +74,6 @@ export default function App() {
     setIsLoading(false);
   };
 
-  const openSampleDB = async () => {
-    const sampleDb = open({
-      name: 'sampleDB',
-    });
-  };
-
   const queryLargeDb = async () => {
     try {
       setIsLoading(true);
@@ -82,6 +82,7 @@ export default function App() {
       setAccessingTimes(times.access);
       setPrepareTimes(times.prepare);
       setPrepareExecutionTimes(times.preparedExecution);
+      setRawExecutionTimes(times.rawExecution);
     } catch (e) {
       console.error(e);
     } finally {
@@ -100,43 +101,80 @@ export default function App() {
     return acc && r.type !== 'incorrect';
   }, true);
 
-  const test = () => {
-    const testDB = open({
-      name: 'testDB',
+  const testAgainstMMKV = () => {
+    const db = open({
+      name: 'mmkvTestDb',
     });
 
-    // testDB.execute('DROP TABLE IF EXISTS segments;');
+    db.execute('PRAGMA mmap_size=268435456');
+    // db.execute('PRAGMA journal_mode = OFF;');
+    db.execute('DROP TABLE IF EXISTS mmkvTest;');
+    db.execute('CREATE TABLE mmkvTest (text TEXT);');
 
-    // testDB.execute(
-    //   `CREATE TABLE segments ("distance" REAL NOT NULL, "endDate" INTEGER NOT NULL, "id" TEXT PRIMARY KEY, "index" INTEGER NOT NULL, "region" TEXT NOT NULL, "speed" REAL NOT NULL, "startDate" INTEGER NOT NULL, "tripId" TEXT NOT NULL, "startLat" REAL NOT NULL, "startLng" REAL NOT NULL, "endLat" REAL NOT NULL, "endLng" REAL NOT NULL) STRICT;`,
-    // );
-
-    const sql = `SELECT EXISTS (
-      SELECT 1
-      FROM sqlite_master
-      WHERE type='table' 
-      AND name='your_table_name'
+    let insertStatment = db.prepareStatement(
+      'INSERT INTO "mmkvTest" (text) VALUES (?)',
     );
-    `;
-    testDB.execute(sql);
+    insertStatment.bind(['quack']);
+
+    let start = performance.now();
+    insertStatment.execute();
+    let end = performance.now();
+    setSqliteMMSetTime(end - start);
+
+    start = performance.now();
+    mmkv.set('mmkvDef', 'quack');
+    end = performance.now();
+    setMMKVSetTime(end - start);
+
+    let readStatement = db.prepareStatement('SELECT text from mmkvTest;');
+    start = performance.now();
+    readStatement.execute();
+    end = performance.now();
+    setSqliteMMGetTime(end - start);
+
+    start = performance.now();
+    mmkv.getString('mmkvDef');
+    end = performance.now();
+    setMMKVGetTime(end - start);
+
+    db.close();
   };
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-900">
       <StyledScrollView>
-        <Text className=" text-white text-2xl p-2">
-          {pak.name.split('_').join(' ')}
-        </Text>
 
         <View className="flex-row p-2 bg-neutral-800 items-center">
           <Text className={'font-bold flex-1 text-white'}>Tools</Text>
         </View>
-        <Button title="Test" onPress={test} />
-        <Button title="Open Sample DB" onPress={openSampleDB} />
         <Button title="Reload app middle of query" onPress={queryAndReload} />
         <Button title="Create 300k Record DB" onPress={createLargeDb} />
         <Button title="Query 300k Records" onPress={queryLargeDb} />
-        <Button title="Query single record" onPress={querySingleRecord} />
+        {/* <Button title="Query single record" onPress={querySingleRecord} />
+        <Button title="Against MMKV" onPress={testAgainstMMKV} /> */}
+        <View className="gap-2 items-center mt-4">
+          {!!sqliteMMSetTime && (
+            <Text className="text-white">
+              MM SQLite Write: {sqliteMMSetTime.toFixed(3)} ms
+            </Text>
+          )}
+          {!!mmkvSetTime && (
+            <Text className="text-white">
+              MMKV Write: {mmkvSetTime.toFixed(3)} ms
+            </Text>
+          )}
+          {!!sqliteGetTime && (
+            <Text className="text-white">
+              MM SQLite Get: {sqliteGetTime.toFixed(3)} ms
+            </Text>
+          )}
+          {!!mmkvGetTime && (
+            <Text className="text-white">
+              MMKV Get: {mmkvGetTime.toFixed(3)} ms
+            </Text>
+          )}
+          
+        </View>
         {isLoading && <ActivityIndicator color={'white'} size="large" />}
 
         {!!singleRecordTime && (
@@ -184,8 +222,17 @@ export default function App() {
             ms
           </Text>
         )}
+        {!!rawExecutionTimes.length &&
+          <Text className="text-lg text-white self-center">
+            Raw execution:  {(
+              rawExecutionTimes.reduce((acc, t) => (acc += t), 0) /
+              rawExecutionTimes.length
+            ).toFixed(0)}{' '}
+            ms
+          </Text>
+          }
 
-        <UpdateHookPage />
+        {/* <UpdateHookPage /> */}
 
         <Text
           className={clsx('font-bold flex-1 text-white p-2 mt-4', {

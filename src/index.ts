@@ -197,6 +197,12 @@ interface ISQLite {
   commitHook: (dbName: string, callback?: (() => void) | null) => void;
   rollbackHook: (dbName: string, callback?: (() => void) | null) => void;
   prepareStatement: (dbName: string, query: string) => PreparedStatementObj;
+  loadExtension: (dbName: string, path: string, entryPoint?: string) => void;
+  executeRawAsync: (
+    dbName: string,
+    query: string,
+    params?: any[]
+  ) => Promise<any[]>;
 }
 
 const locks: Record<
@@ -420,6 +426,8 @@ export type OPSQLiteConnection = {
   commitHook: (callback: (() => void) | null) => void;
   rollbackHook: (callback: (() => void) | null) => void;
   prepareStatement: (query: string) => PreparedStatementObj;
+  loadExtension: (path: string, entryPoint?: string) => void;
+  executeRawAsync: (query: string, params?: any[]) => Promise<any[]>;
 };
 
 export const open = ({
@@ -456,5 +464,9 @@ export const open = ({
     commitHook: (callback) => OPSQLite.commitHook(name, callback),
     rollbackHook: (callback) => OPSQLite.rollbackHook(name, callback),
     prepareStatement: (query) => OPSQLite.prepareStatement(name, query),
+    loadExtension: (path, entryPoint) =>
+      OPSQLite.loadExtension(name, path, entryPoint),
+    executeRawAsync: (query, params) =>
+      OPSQLite.executeRawAsync(name, query, params),
   };
 };

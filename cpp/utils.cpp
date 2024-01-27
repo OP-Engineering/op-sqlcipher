@@ -187,6 +187,22 @@ createResult(jsi::Runtime &rt, BridgeResult status,
   return std::move(res);
 }
 
+jsi::Value
+create_raw_result(jsi::Runtime &rt, BridgeResult status,
+                  const std::vector<std::vector<JSVariant>> *results) {
+  size_t row_count = results->size();
+  jsi::Array res = jsi::Array(rt, row_count);
+  for (int i = 0; i < row_count; i++) {
+    auto row = results->at(i);
+    auto array = jsi::Array(rt, row.size());
+    for (int j = 0; j < row.size(); j++) {
+      array.setValueAtIndex(rt, j, toJSI(rt, row[j]));
+    }
+    res.setValueAtIndex(rt, i, array);
+  }
+  return res;
+}
+
 BatchResult importSQLFile(std::string dbName, std::string fileLocation) {
   std::string line;
   std::ifstream sqFile(fileLocation);
@@ -194,12 +210,12 @@ BatchResult importSQLFile(std::string dbName, std::string fileLocation) {
     try {
       int affectedRows = 0;
       int commands = 0;
-      sqlite_execute_literal(dbName, "BEGIN EXCLUSIVE TRANSACTION");
+      opsqlite_execute_literal(dbName, "BEGIN EXCLUSIVE TRANSACTION");
       while (std::getline(sqFile, line, '\n')) {
         if (!line.empty()) {
-          BridgeResult result = sqlite_execute_literal(dbName, line);
+          BridgeResult result = opsqlite_execute_literal(dbName, line);
           if (result.type == SQLiteError) {
-            sqlite_execute_literal(dbName, "ROLLBACK");
+            opsqlite_execute_literal(dbName, "ROLLBACK");
             sqFile.close();
             return {SQLiteError, result.message, 0, commands};
           } else {
@@ -209,11 +225,11 @@ BatchResult importSQLFile(std::string dbName, std::string fileLocation) {
         }
       }
       sqFile.close();
-      sqlite_execute_literal(dbName, "COMMIT");
+      opsqlite_execute_literal(dbName, "COMMIT");
       return {SQLiteOk, "", affectedRows, commands};
     } catch (...) {
       sqFile.close();
-      sqlite_execute_literal(dbName, "ROLLBACK");
+      opsqlite_execute_literal(dbName, "ROLLBACK");
       return {SQLiteError,
               "[op-sqlite][loadSQLFile] Unexpected error, transaction was "
               "rolledback",

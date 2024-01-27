@@ -22,10 +22,6 @@ std::vector<jsi::PropNameID>
 PreparedStatementHostObject::getPropertyNames(jsi::Runtime &rt) {
   std::vector<jsi::PropNameID> keys;
 
-  //  for (auto field : fields) {
-  //    keys.push_back(jsi::PropNameID::forAscii(rt, field.first));
-  //  }
-
   return keys;
 }
 
@@ -39,16 +35,10 @@ jsi::Value PreparedStatementHostObject::get(jsi::Runtime &rt,
         throw std::runtime_error("statement has been freed");
       }
 
-      std::vector<JSVariant> params;
+      const jsi::Value &js_params = args[0];
+      std::vector<JSVariant> params = toVariantVec(rt, js_params);
 
-      const jsi::Value &originalParams = args[0];
-      params = toVariantVec(rt, originalParams);
-
-      std::vector<DumbHostObject> results;
-      std::shared_ptr<std::vector<SmartHostObject>> metadata =
-          std::make_shared<std::vector<SmartHostObject>>();
-
-      sqlite_bind_statement(_statement, &params);
+      opsqlite_bind_statement(_statement, &params);
 
       return {};
     });
@@ -63,8 +53,8 @@ jsi::Value PreparedStatementHostObject::get(jsi::Runtime &rt,
       std::shared_ptr<std::vector<SmartHostObject>> metadata =
           std::make_shared<std::vector<SmartHostObject>>();
 
-      auto status = sqlite_execute_prepared_statement(_dbName, _statement,
-                                                      &results, metadata);
+      auto status = opsqlite_execute_prepared_statement(_dbName, _statement,
+                                                        &results, metadata);
 
       if (status.type == SQLiteError) {
         throw std::runtime_error(status.message);

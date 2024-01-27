@@ -1,53 +1,30 @@
-![Header](Header.png)
+![benchmark](benchmark.png)
 
-<div align="center">
-  <pre align="center">
-    yarn add @op-engineering/op-sqlcipher
-    npx pod-install</pre>
-  <br />
-</div>
-<br />
+```sh
+yarn add @op-engineering/op-sqlcipher && npx pod-install
+```
 
-OP SQLCipher embeds the latest version of [SQLCipher](https://github.com/sqlcipher/sqlcipher) and provides a low-level (JSI-backed) API to execute SQL queries.
+OP-SQLCipher embeds the latest version of SQLite and provides a low-level API to execute SQL queries.
 
 **SQLCipher embedded SQLite version: 3.42.0**
 
-Created by [@ospfranco](https://twitter.com/ospfranco). **Please consider Sponsoring**, none of this work is for free. I pay for it with my time and knowledge. If you are a company in need of help with your React Native/React apps feel free to reach out. I also do a lot of C++ and nowadays Rust.
+Created by [@ospfranco](https://twitter.com/ospfranco). **Please consider sponsoring!**.
 
 ## Benchmarks
 
 You can find the [benchmarking code in the example app](https://github.com/OP-Engineering/op-sqlite/blob/main/example/src/Database.ts#L44). This is run using the `OP_SQLITE_PERF` [performance flag](#perf-flag) which in turns disables some old and unused features of sqlite to squeeze the last drop of performance.
 
-![benchmark](benchmark.png)
-
-Memory consumption is also 1/4 compared to `react-native-quick-sqlite`. This query used to take 1.2 GB of peak memory usage, and now runs in 250mbs.
+Memory consumption is minimised as much as possible since all the data is shared via HostObjects, meaning large queries can be run in few mbs.
 
 You can also turn on [Memory Mapping](#speed) to make your queries even faster by skipping the kernel during I/O and potentially reduce RAM usage, this comes with some disadvantages though. If you want even more speed and you can re-use your queries you can use [Prepared Statements](#prepared-statements).
 
-# Duplicated libcrypto.so
+Here is another benchmark with all the optimizations reading a single string value against react-native-mmkv.
 
-If you have any library that also depends on OpenSSL (i.e. by using `flipper` or `expo`), you might find an issue similar to this when building Android:
+![benchmark](benchmark2.png)
 
-```
-Execution failed for task ':app:mergeDebugNativeLibs'.
-> A failure occurred while executing com.android.build.gradle.internal.tasks.MergeNativeLibsTask$MergeNativeLibsTaskWorkAction
-   > 2 files found with path 'lib/arm64-v8a/libcrypto.so' from inputs:
-      - /Users/osp/Developer/mac_test/node_modules/react-native-quick-crypto/android/build/intermediates/library_jni/debug/jni/arm64-v8a/libcrypto.so
-      - /Users/osp/.gradle/caches/transforms-3/e13f88164840fe641a466d05cd8edac7/transformed/jetified-flipper-0.182.0/jni/arm64-v8a/libcrypto.so
-```
+# Encryption
 
-It means you have a transitive dependency where two libraries depend on OpenSSL and are generating a `libcrypto.so`. You can get around this issue by adding the following in your `app/build.gradle`:
-
-```groovy
-packagingOptions {
-  // Should prevent clashes with other libraries that use OpenSSL
-  pickFirst '**/libcrypto.so'
-}
-```
-
-> Usually this is caused by flipper which also depends on OpenSSL
-
-This just tells Gradle to grab whatever OpenSSL version it finds first and link against that, but as you can imagine this is not correct if the packages depend on different OpenSSL versions (op-sqlcipher depends on `com.android.ndk.thirdparty:openssl:1.1.1q-beta-1`). You should make sure all the OpenSSL versions match and you have no conflicts or errors.
+If you need to encrypt your entire database, there is [`op-sqlcipher`](https://github.com/OP-Engineering/op-sqlcipher), which is a fork of this library that uses [SQLCipher](https://github.com/sqlcipher/sqlcipher). It completely encrypts the database with minimal overhead.
 
 # Database Location
 
@@ -81,7 +58,7 @@ import {
   IOS_DOCUMENT_PATH,
   ANDROID_DATABASE_PATH, // Default Android
   ANDROID_FILES_PATH,
-  ANDROID_EXTERNAL_FILES_PATH,
+  ANDROID_EXTERNAL_FILES_PATH, // Android SD Card
   open,
 } from '@op-engineering/op-sqlcipher';
 
@@ -127,9 +104,11 @@ const largeDb = open({
 });
 ```
 
+In memory databases are faster since they don't need to hit the disk I/O to save the data and are useful for synchronization only workflows.
+
 # Performance
 
-op-sqlite is already the fastest solution it can be, but it doesn't mean you cannot tweak SQLite to be faster (at the cost of some disadvantages). One possible tweak is turning on [Memory Mapping](https://www.sqlite.org/mmap.html). It allows to read/write to/from the disk without going through the kernel. However, if your queries throw an error your application might crash.
+You can tweak SQLite to be faster (at the cost of some disadvantages). One possibility is [Memory Mapping](https://www.sqlite.org/mmap.html). It allows to read/write to/from the disk without going through the kernel. However, if your queries throw an error your application might crash.
 
 To turn on Memory Mapping, execute the following pragma statement after opening a db:
 
@@ -142,15 +121,13 @@ const db = open({
 db.execute('PRAGMA mmap_size=268435456');
 ```
 
-You can also set journaling to memory (or even OFF if you are kinda crazy) to gain even more speed. Journaling is what allows SQLite to ROLLBACK statements and it is dangerous, so do it at your own risk
+You can also set journaling to memory (or even OFF if you are kinda crazy) to gain even more speed. Journaling is what allows SQLite to ROLLBACK statements and modifying it dangerous, so do it at your own risk
 
 ```ts
 db.execute('PRAGMA journal_mode = MEMORY;'); // or OFF
 ```
 
-If you use [prepared statements](#prepared-statements) plus memory mapping and set journaling to memory, you can get to inches of MMKV for the most performance critical queries, here is a simple example writing/reading a single value.
-
-![mmkv comparison](mmkv.png)
+If you use [prepared statements](#prepared-statements) are useful to reduce the time of critical queries.
 
 # Perf flag
 
@@ -185,7 +162,7 @@ db.execute('CREATE TABLE Test (
           ) STRICT;');
 ```
 
-If you don't set it, SQLite will happily write whatever you insert in your table, independtly of the declared type.
+If you don't set it, SQLite will happily write whatever you insert in your table, independtly of the declared type (it will try to cast it though, e.g. "1" string might be turned to 1 int).
 
 ## Foreign constraints
 
@@ -364,13 +341,9 @@ metadata.forEach((column) => {
 You might have too much SQL to process and it will cause your application to freeze. There are async versions for some of the operations. This will offload the SQLite processing to a different thread.
 
 ```ts
-db.executeAsync(
-  'myDatabase',
-  'SELECT * FROM "User";',
-  []).then(({rows}) => {
-    console.log('users', rows._array);
-  })
-);
+db.executeAsync('SELECT * FROM "User";', []).then(({ rows }) => {
+  console.log('users', rows._array);
+});
 ```
 
 ## Blobs
@@ -415,6 +388,15 @@ let results2 = statement.execute();
 ```
 
 You only pay the price of parsing the query once, and each subsequent execution should be faster.
+
+# Raw execution
+
+If you don't care about the keys you can use a simplified execution that will return an array of results.
+
+```ts
+let result = await db.executeRawAsync('SELECT * FROM Users;');
+// result = [[123, 'Katie', ...]]
+```
 
 # Attach or Detach other databases
 
@@ -517,6 +499,16 @@ db.commitHook(null);
 db.rollbackHook(null);
 ```
 
+# Use built-in SQLite
+
+On iOS you can use the embedded SQLite, when running `pod-install` add an environment flag:
+
+```
+OP_SQLITE_USE_PHONE_VERSION=1 npx pod-install
+```
+
+On Android, it is not possible to link the OS SQLite. It is also a bad idea due to vendor changes, old android bugs, etc. Unfortunately, this means this library will add some megabytes to your app size. Take note that the embedded version of SQLite does not support loading runtime extensions due to security concerns from apple.
+
 # Enable compile-time options
 
 By specifying pre-processor flags, you can enable optional features like FTS5, Geopoly, etc.
@@ -548,6 +540,16 @@ You can specify flags via `<PROJECT_ROOT>/android/gradle.properties` like so:
 OPSQLiteFlags="-DSQLITE_ENABLE_FTS5=1"
 ```
 
+# Runtime loadable extensions
+
+You can load your own extensions on runtime.
+
+```ts
+db.loadExtension('/path/to/library.so', 'optional_entry_point_function_name');
+```
+
+You will need to compile your extension for both iOS and Android and all the respective architectures and make it available in a location the library can read (be careful about sandboxing).
+
 # Additional configuration
 
 ## App groups (iOS only)
@@ -555,6 +557,24 @@ OPSQLiteFlags="-DSQLITE_ENABLE_FTS5=1"
 On iOS, the SQLite database can be placed in an app group, in order to make it accessible from other apps in that app group. E.g. for sharing capabilities.
 
 To use an app group, add the app group ID as the value for the `OPSQLite_AppGroup` key in your project's `Info.plist` file. You'll also need to configure the app group in your project settings. (Xcode -> Project Settings -> Signing & Capabilities -> Add Capability -> App Groups)
+
+## use_frameworks
+
+If you are using `use_frameworks` (because one of your dependencies requires e.g. firebase), you might get a linking error since the OS version will try to be linked instead of the version compiled directly from sources. In order to get around this you can add the following into your Podfile:
+
+```ruby
+  pre_install do |installer|
+    installer.pod_targets.each do |pod|
+      if pod.name.eql?('op-sqlite')
+        def pod.build_type
+          Pod::BuildType.static_library
+        end
+      end
+    end
+  end
+```
+
+It will change the type of library only for op-sqlite only to static. This should be fine as SQLite is compiled from sources, so no missing symbols should be there.
 
 # Contribute
 
