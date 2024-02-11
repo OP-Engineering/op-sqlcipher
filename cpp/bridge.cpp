@@ -261,7 +261,7 @@ BridgeResult opsqlite_execute_prepared_statement(
           // Intentionally left blank
 
         default:
-          row.values.push_back(JSVariant(NULL));
+          row.values.push_back(JSVariant(nullptr));
           break;
         }
         i++;
@@ -449,7 +449,7 @@ opsqlite_execute(std::string const &dbName, std::string const &query,
             // Intentionally left blank
 
           default:
-            row.values.push_back(JSVariant(NULL));
+            row.values.push_back(JSVariant(nullptr));
             break;
           }
           i++;
@@ -621,7 +621,7 @@ opsqlite_execute_raw(std::string const &dbName, std::string const &query,
             // Intentionally left blank
 
           default:
-            row.push_back(JSVariant(NULL));
+            row.push_back(JSVariant(nullptr));
             break;
           }
           i++;
