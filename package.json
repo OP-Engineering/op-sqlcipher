@@ -1,6 +1,6 @@
 {
-  "name": "@op-engineering/op-sqlcipher",
-  "version": "2.0.19",
+  "name": "@op-engineering/op-sqlite",
+  "version": "2.0.21",
   "description": "Next generation SQLite for React Native",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
@@ -13,23 +13,20 @@
     "android",
     "ios",
     "cpp",
-    "*.podspec",
-    "!ios/build",
+    "op-sqlite.podspec",
+    "!lib/typescript/example",
     "!android/build",
-    "!android/gradle",
-    "!android/gradlew",
-    "!android/gradlew.bat",
-    "!android/local.properties",
+    "!android/.cxx",
+    "!ios/build",
     "!**/__tests__",
     "!**/__fixtures__",
-    "!**/__mocks__",
-    "!**/.*"
+    "!**/__mocks__"
   ],
   "scripts": {
-    "example": "yarn workspace op_sqlite_cipher_example",
-    "typescript": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "prepare": "bob build",
-    "pods": "cd example/ios && bundle exec pod install",
+    "example": "yarn --cwd example",
+    "pods": "cd example && yarn pods",
     "bootstrap": "yarn example && yarn && yarn pods",
     "bump": "./bump-version.sh"
   },
@@ -38,13 +35,13 @@
     "ios",
     "android"
   ],
-  "repository": "https://github.com/OP-Engineering/op-sqlcipher",
+  "repository": "https://github.com/OP-Engineering/op-sqlite",
   "author": "Oscar Franco <ospfranco@protonmail.com> (https://github.com/ospfranco)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/OP-Engineering/op-sqlcipher/issues"
+    "url": "https://github.com/OP-Engineering/op-sqlite/issues"
   },
-  "homepage": "https://github.com/OP-Engineering/op-sqlcipher#readme",
+  "homepage": "https://github.com/OP-Engineering/op-sqlite#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
@@ -53,18 +50,12 @@
     "react": "18.2.0",
     "react-native": "0.73.1",
     "react-native-builder-bob": "^0.23.2",
+    "turbo": "^1.12.4",
     "typescript": "5.0.4"
   },
   "peerDependencies": {
     "react": "*",
     "react-native": "*"
-  },
-  "workspaces": [
-    "example"
-  ],
-  "packageManager": "yarn@4.0.2",
-  "engines": {
-    "node": ">= 18.0.0"
   },
   "codegenConfig": {
     "name": "OPSQLiteSpec",
@@ -74,6 +65,9 @@
       "javaPackageName": "com.op.sqlite"
     }
   },
+  "workspaces": [
+    "example"
+  ],
   "prettier": {
     "quoteProps": "consistent",
     "singleQuote": true,
@@ -94,5 +88,6 @@
         }
       ]
     ]
-  }
+  },
+  "packageManager": "yarn@4.1.0"
 }

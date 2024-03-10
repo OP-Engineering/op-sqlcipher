@@ -150,6 +150,9 @@ BridgeResult opsqlite_remove(std::string const &dbName,
 
 inline void opsqlite_bind_statement(sqlite3_stmt *statement,
                                     const std::vector<JSVariant> *values) {
+  // reset any existing bound values
+  sqlite3_clear_bindings(statement);
+
   size_t size = values->size();
 
   for (int ii = 0; ii < size; ii++) {
@@ -184,8 +187,6 @@ BridgeResult opsqlite_execute_prepared_statement(
     std::shared_ptr<std::vector<SmartHostObject>> metadatas) {
 
   check_db_open(dbName);
-
-  sqlite3_reset(statement);
 
   sqlite3 *db = dbMap[dbName];
 
@@ -300,8 +301,9 @@ BridgeResult opsqlite_execute_prepared_statement(
     }
   }
 
-  if (isFailed) {
+  sqlite3_reset(statement);
 
+  if (isFailed) {
     return {.type = SQLiteError,
             .message = "[op-sqlite] SQLite code: " + std::to_string(result) +
                        " execution error: " + std::string(errorMessage)};
